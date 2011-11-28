@@ -40,7 +40,7 @@ class CalendarEvent(dict):
         if key in self.__slots__:
             self[key] = value
         else:
-            raise Exception("dict attributes are not modifiable.")
+            raise AttributeError("dict attributes are not modifiable.")
         
     def __lt__(self, other):
         assert type(other) is CalendarEvent, "Both objects must be CalendarEvents to compare."
@@ -111,7 +111,7 @@ class CalendarParser(object):
                     event_list.append(event)
                 
             if len(event_list) == 0:
-                return None
+                raise LookupError("'%s' is not an event in this calendar." % (item))
             if len(event_list) == 1:
                 return event_list[0]
             else:
@@ -226,9 +226,11 @@ class CalendarParser(object):
         self.date_published = self.__parse_time(
             metadata[1].contents[6].contents[5].next.next.contents[1].next)
         
-        self.events = []
         raw_events = self.calendar.contents[3:]
 
+        if overwrite_events:
+            self.events = []
+        
         for event in raw_events:
             event_dict = CalendarEvent()
             event_dict["name"] = self.__normalize(event.next.next)
@@ -304,6 +306,9 @@ class CalendarParser(object):
         self.fetch_calendar(force_ics=True)
         self.time_zone = timezone(str(self.calendar["x-wr-timezone"]))
         self.title = str(self.calendar["x-wr-calname"])
+
+        if overwrite_events:
+            self.events = []
 
         for event in self.calendar.walk():
             if isinstance(event, Event):
