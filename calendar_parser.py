@@ -1,3 +1,5 @@
+"A Google Calendar Parser"
+
 from datetime import datetime, date, timedelta
 from time import strptime, mktime
 from xml.sax.saxutils import unescape
@@ -6,7 +8,8 @@ from urllib2 import urlopen
 # From Requirements.txt
 from pytz import timezone
 from icalendar.cal import Calendar, Event
-from BeautifulSoup import BeautifulStoneSoup
+from BeautifulSoup import BeautifulStoneSoup, Tag
+
 
 TIME_FORMATS = (
     "%a %b %d, %Y %I:%M%p",
@@ -15,8 +18,64 @@ TIME_FORMATS = (
     "%Y-%m-%dT%H:%M:%S"
 )
 
-class CalendarEvent(dict):
+def _parse_time(time_str, reference_date=None):
+    """\
+    Parses a calendar time string, and outputs a datetime object of the specified time.
+    Only compatible with the time formats listed in the TIME_FORMATS tuple.
+
+    'reference_date' is another time-string, used when the original time_str doesn't contain any date information.
     """
+    time_struct = None
+    if len(time_str.split()) == 1:
+        if "T" in time_str:
+            time_str = time_str.rsplit('.', 1)[0]
+        else:
+            assert reference_date, "Hour-only time strings need a reference date string."
+            time_str = " ".join(reference_date.split()[:4]) + " " + time_str
+
+    if len(time_str.split()) == 5:
+        if ":" in time_str:
+            time_struct = strptime(time_str, TIME_FORMATS[0])
+        else:
+            time_struct = strptime(time_str, TIME_FORMATS[1])
+
+    elif len(time_str.split()) == 4:
+        time_struct = strptime(time_str, TIME_FORMATS[2])
+    else:
+        time_struct = strptime(time_str, TIME_FORMATS[3])
+
+    return datetime.fromtimestamp(mktime(time_struct))
+
+
+def _fix_timezone(datetime_obj, time_zone):
+    """\
+    Adjusts time relative to the calendar's timezone,
+    then removes the datetime object's timezone property.
+    """
+    if type(datetime_obj) is datetime and datetime_obj.tzinfo is not None:
+        return datetime_obj.astimezone(time_zone).replace(tzinfo=None)
+
+    elif type(datetime_obj) is date:
+        return datetime(datetime_obj.year, datetime_obj.month, datetime_obj.day)
+    
+    return datetime_obj
+
+
+def _normalize(data_string, convert_whitespace=False):
+    "Removes various markup artifacts and returns a normal python string."
+    new_string = unescape(str(data_string))
+    new_string = new_string.replace('&nbsp;', ' ').replace('&quot;', '"').replace('&brvbar;', '|')
+    new_string = new_string.replace("&#39;", "'").replace("\\", '')
+    new_string = new_string.strip()
+
+    if convert_whitespace:
+        return ' '.join(new_string.split())
+        
+    return new_string
+
+
+class CalendarEvent(dict):
+    """\
     A modified dictionary that allows accessing and modifying the main properties of a calendar event
     as both attributes, and dictionary keys; i.e. 'event["name"]' is the same as using 'event.name'
 
@@ -34,7 +93,7 @@ class CalendarEvent(dict):
         if key in self.__slots__:
             return self[key]
         else:
-            return dict.__getattribute__(self,key)
+            return dict.__getattribute__(self, key)
         
     def __setattr__(self, key, value):
         if key in self.__slots__:
@@ -54,20 +113,20 @@ class CalendarEvent(dict):
         assert type(other) is CalendarEvent, "Both objects must be CalendarEvents to compare."
         return self["start_time"] > other["start_time"]
 
-    def __gt__(self, other):
+    def __ge__(self, other):
         assert type(other) is CalendarEvent, "Both objects must be CalendarEvents to compare."
         return self["start_time"] >= other["start_time"]
 
 
 class CalendarParser(object):
-    """
+    """\
     A practical calendar parser for Google Calendar's two output formats: XML, and iCal (.ics).
     Stores events as a list of dictionaries with self-describing attributes.
     Accepts url resources as well as local xml/ics files.
     Certain fields/properties are not available when parsing ics resources.
-
-    TODO: Accept calendarIDs and support google's REST api
     """
+    # TODO: Accept calendarIDs and support google's REST api
+
     def __init__(self, ics_url=None, xml_url=None, ics_file=None, xml_file=None):
         self.ics_file = ics_file
         self.ics_url = ics_url
@@ -94,7 +153,7 @@ class CalendarParser(object):
 
     def __contains__(self, item):
         if type(item) is not str:
-            return item in events
+            return item in self.events
         
         for event in self.events:
             if event["name"].lower() == item.lower():
@@ -102,7 +161,6 @@ class CalendarParser(object):
             
         return False
 
-    
     def __getitem__(self, item):
         if type(item) is str:
             event_list = []
@@ -121,69 +179,24 @@ class CalendarParser(object):
 
 
     def keys(self):
+        "Returns the names of all the parsed events, which may be used as lookup-keys on the parser object."
         return [event["name"] for event in self.events]
 
 
-    def sort_by_latest(sort_in_place=False):
+    def sort_by_latest(self, sort_in_place=False):
+        "Returns a list of the parsed events, where the newest events are listed first."
         sorted_events = sorted(self.events, reverse=True)
         if sort_in_place:
             self.events = sorted_events
         return sorted_events
 
-    def sort_by_oldest(sort_in_place=False):
+    def sort_by_oldest(self, sort_in_place=False):
+        "Returns a list of the parsed events, where the oldest events are listed first."
         sorted_events = sorted(self.events)
         if sort_in_place:
             self.events = sorted_events
         return sorted_events
 
-    
-    def __parse_time(self, time_str, reference_date=None):
-        time_struct = None
-        if len(time_str.split()) == 1:
-            if "T" in time_str:
-                time_str = time_str.rsplit('.',1)[0]
-            else:
-                assert reference_date, "Hour-only time strings need a reference date string."
-                time_str = " ".join(reference_date.split()[:4]) + " " + time_str
-
-        if len(time_str.split()) == 5:
-            if ":" in time_str:
-                time_struct = strptime(time_str, TIME_FORMATS[0])
-            else:
-                time_struct = strptime(time_str, TIME_FORMATS[1])
-                
-        elif len(time_str.split()) == 4:
-            time_struct = strptime(time_str, TIME_FORMATS[2])
-        else:
-            time_struct = strptime(time_str, TIME_FORMATS[3])
-
-        return datetime.fromtimestamp(mktime(time_struct))
-
-
-    def __fix_timezone(self, datetime_obj):
-        """
-        Adjusts time relative to the calendar's timezone,
-        then removes the datetime object's timezone property.
-        """
-        if type(datetime_obj) is datetime and datetime_obj.tzinfo is not None:
-            return datetime_obj.astimezone(self.time_zone).replace(tzinfo=None)
-
-        elif type(datetime_obj) is date:
-            return datetime(datetime_obj.year, datetime_obj.month, datetime_obj.day)
-
-        return datetime_obj
-
-    def __normalize(self, data_string, convert_whitespace=False):
-        "Removes various markup artifacts and returns a normal python string."
-        new_string = unescape(str(data_string))
-        new_string = new_string.replace('&nbsp;', ' ').replace('&quot;', '"').replace('&brvbar;', '|')
-        new_string = new_string.replace("&#39;","'").replace("\\",'')
-        new_string = new_string.strip()
-
-        if convert_whitespace:
-            return ' '.join(new_string.split())
-        
-        return new_string
 
     def fetch_calendar(self, force_xml=False, force_ics=False):
         "Fetches the calendar data from an XML/.ics resource in preperation for parsing."
@@ -203,7 +216,7 @@ class CalendarParser(object):
         cal_data.close()
 
         if (self.xml_url or self.xml_file) and not force_ics:
-            self.calendar = BeautifulStoneSoup(self.__normalize(cal_str, True))
+            self.calendar = BeautifulStoneSoup(_normalize(cal_str, True))
         elif (self.ics_url or self.ics_file) and not force_xml:
             self.calendar = Calendar.from_string(cal_str)
 
@@ -222,8 +235,8 @@ class CalendarParser(object):
         self.author = metadata[1].contents[6].next.next.next
         self.email = metadata[1].contents[6].next.contents[1].next
         self.time_zone = timezone(metadata[1].contents[6].contents[5].attrs[0][1])
-        self.last_updated = self.__parse_time(metadata[0].next)
-        self.date_published = self.__parse_time(
+        self.last_updated = _parse_time(metadata[0].next)
+        self.date_published = _parse_time(
             metadata[1].contents[6].contents[5].next.next.contents[1].next)
         
         raw_events = self.calendar.contents[3:]
@@ -233,12 +246,12 @@ class CalendarParser(object):
         
         for event in raw_events:
             event_dict = CalendarEvent()
-            event_dict["name"] = self.__normalize(event.next.next)
+            event_dict["name"] = _normalize(event.next.next)
             event_dict["repeats"] = False
 
             for content in event.contents[2]:
-                try:    content = content.contents[0]
-                except: pass
+                if isinstance(content, Tag):
+                    content = content.contents[0]
 
                 if "Recurring Event" in content:
                     event_dict["repeats"] = True
@@ -274,12 +287,12 @@ class CalendarParser(object):
                     when = when.split(" to ")
                     if len(when) == 2:
                         start, end = when
-                        event_dict["end_time"] = self.__parse_time(end, start)
+                        event_dict["end_time"] = _parse_time(end, start)
                     else:
-                        start = when[0]                        
-                    event_dict["start_time"] = self.__parse_time(start)
+                        start = when[0]
+                    event_dict["start_time"] = _parse_time(start)
 
-                    if not event_dict.has_key("end_time") \
+                    if not "end_time" in event_dict \
                     and event_dict["start_time"].hour == 0 \
                     and event_dict["start_time"].minute == 0:
                         event_dict["all_day"] = True
@@ -289,10 +302,10 @@ class CalendarParser(object):
                     
 
                 elif "Where: " in content:
-                    event_dict["location"] = self.__normalize(content).replace("Where: ", "")
+                    event_dict["location"] = _normalize(content).replace("Where: ", "")
 
                 elif "Event Description: " in content:
-                    event_dict["description"] = self.__normalize(content).replace("Event Description: ", "")
+                    event_dict["description"] = _normalize(content).replace("Event Description: ", "")
 
             if overwrite_events:
                 self.events.append(event_dict)
@@ -303,7 +316,10 @@ class CalendarParser(object):
     def parse_ics(self, overwrite_events=True):
         "Returns a generator of Event dictionaries from an iCal (.ics) file."
         assert self.ics_url or self.ics_url, "No ics resource has been set."
+
+        # Returns an icalendar.Calendar object.
         self.fetch_calendar(force_ics=True)
+
         self.time_zone = timezone(str(self.calendar["x-wr-timezone"]))
         self.title = str(self.calendar["x-wr-calname"])
 
@@ -314,15 +330,15 @@ class CalendarParser(object):
             if isinstance(event, Event):
                 event_dict = CalendarEvent()
                 if "SUMMARY" in event:
-                    event_dict["name"] = self.__normalize(event["summary"])
+                    event_dict["name"] = _normalize(event["summary"])
                 if "DESCRIPTION" in event:
-                    event_dict["description"] = self.__normalize(event["description"])
+                    event_dict["description"] = _normalize(event["description"])
                 if "LOCATION" in event and event["location"]:
-                    event_dict["location"] = self.__normalize(event["location"])
+                    event_dict["location"] = _normalize(event["location"])
                 if "DTSTART" in event:
-                    event_dict["start_time"] = self.__fix_timezone(event["dtstart"].dt)
+                    event_dict["start_time"] = _fix_timezone(event["dtstart"].dt, self.time_zone)
                 if "DTEND" in event:
-                    event_dict["end_time"] = self.__fix_timezone(event["dtend"].dt)
+                    event_dict["end_time"] = _fix_timezone(event["dtend"].dt, self.time_zone)
                 
                 event_dict["repeats"] = False
                 if "RRULE" in event:
@@ -351,7 +367,7 @@ class CalendarParser(object):
                         event_dict["repeat_month"] = rep_dict["BYMONTH"][0]
 
                     if "UNTIL" in rep_dict:
-                        event_dict["repeat_until"] = self.__fix_timezone(rep_dict["UNTIL"][0])
+                        event_dict["repeat_until"] = _fix_timezone(rep_dict["UNTIL"][0], self.time_zone)
 
                 if overwrite_events:
                     self.events.append(event_dict)
@@ -360,6 +376,7 @@ class CalendarParser(object):
 
 
     def parse_calendar(self, force_list=False, use_xml=False, use_ics=False, overwrite_events=True):
+        "Parses the calendar at the specified resource path.  Returns a generator of CalendarEvents."
         generator = None
         if (self.ics_url or self.ics_file) and (use_ics or not use_xml):
             generator = self.parse_ics(overwrite_events)
@@ -371,4 +388,3 @@ class CalendarParser(object):
             return [event for event in generator]
         else:
             return generator
-
