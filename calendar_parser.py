@@ -27,22 +27,20 @@ def _parse_time(time_str, reference_date=None):
     """
     time_struct = None
     if len(time_str.split()) == 1:
-        if "T" in time_str:
+        if "." in time_str:
             time_str = time_str.rsplit('.', 1)[0]
         else:
             assert reference_date, "Hour-only time strings need a reference date string."
             time_str = " ".join(reference_date.split()[:4]) + " " + time_str
 
-    if len(time_str.split()) == 5:
-        if ":" in time_str:
-            time_struct = strptime(time_str, TIME_FORMATS[0])
-        else:
-            time_struct = strptime(time_str, TIME_FORMATS[1])
+    for time_format in TIME_FORMATS:
+        try:
+            time_struct = strptime(time_str, time_format)
+        except ValueError:
+            pass
 
-    elif len(time_str.split()) == 4:
-        time_struct = strptime(time_str, TIME_FORMATS[2])
-    else:
-        time_struct = strptime(time_str, TIME_FORMATS[3])
+    if time_struct == None:
+        raise ValueError("Unsopported time string format: %s" % (time_str))
 
     return datetime.fromtimestamp(mktime(time_struct))
 
@@ -60,16 +58,22 @@ def _fix_timezone(datetime_obj, time_zone):
     
     return datetime_obj
 
+def _multi_replace(string, replace_dict):
+    "Replaces multiple items in a string, where replace_dict consists of {value_to_be_removed: replced_by, etc...}"
+    for key, value in replace_dict.iteritems():
+        string = string.replace(str(key), str(value))
+    return string
 
 def _normalize(data_string, convert_whitespace=False):
     "Removes various markup artifacts and returns a normal python string."
     new_string = unescape(str(data_string))
-    new_string = new_string.replace('&nbsp;', ' ').replace('&quot;', '"').replace('&brvbar;', '|')
-    new_string = new_string.replace("&#39;", "'").replace("\\", '')
+    new_string = _multi_replace(new_string, {
+        '&nbsp;': ' ', '&quot;': '"', '&brvbar;': '|', "&#39;": "'", "\\": ""
+    })
     new_string = new_string.strip()
 
     if convert_whitespace:
-        return ' '.join(new_string.split())
+        return " ".join(new_string.split())
         
     return new_string
 
