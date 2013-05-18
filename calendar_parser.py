@@ -222,7 +222,7 @@ class CalendarParser(object):
         if (self.xml_url or self.xml_file) and not force_ics:
             self.calendar = BeautifulStoneSoup(_normalize(cal_str, True))
         elif (self.ics_url or self.ics_file) and not force_xml:
-            self.calendar = Calendar.from_string(cal_str)
+            self.calendar = Calendar.from_ical(cal_str)
 
         return self.calendar
 
