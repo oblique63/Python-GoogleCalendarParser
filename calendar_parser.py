@@ -343,6 +343,12 @@ class CalendarParser(object):
                     event_dict["start_time"] = _fix_timezone(event["dtstart"].dt, self.time_zone)
                 if "DTEND" in event:
                     event_dict["end_time"] = _fix_timezone(event["dtend"].dt, self.time_zone)
+                if event_dict["start_time"].hour == 0 \
+                and event_dict["start_time"].minute == 0 \
+                and (event_dict["end_time"] - event_dict["start_time"]) == timedelta(days=1):
+                    event_dict["all_day"] = True
+                else:
+                    event_dict["all_day"] = False
                 
                 event_dict["repeats"] = False
                 if "RRULE" in event:
@@ -354,13 +360,6 @@ class CalendarParser(object):
                     if event_dict["repeat_freq"] == "YEARLY":
                         event_dict["repeat_day"] = event_dict["start_time"].day
                         event_dict["repeat_month"] = event_dict["start_time"].month
-
-                        if event_dict["start_time"].hour == 0 \
-                        and event_dict["start_time"].minute == 0 \
-                        and (event_dict["end_time"] - event_dict["start_time"]) == timedelta(days=1):
-                            event_dict["all_day"] = True
-                        else:
-                            event_dict["all_day"] = False
 
                     if "BYDAY" in rep_dict:
                         event_dict["repeat_day"] = rep_dict["BYDAY"][0]
