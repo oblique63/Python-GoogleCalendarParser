@@ -64,9 +64,15 @@ def _multi_replace(string, replace_dict):
         string = string.replace(str(key), str(value))
     return string
 
+def to_unicode_or_bust(obj, encoding='utf-8'):
+  if isinstance(obj, basestring):
+    if not isinstance(obj, unicode):
+      obj = unicode(obj, encoding)
+  return obj
+
 def _normalize(data_string, convert_whitespace=False):
     "Removes various markup artifacts and returns a normal python string."
-    new_string = unescape(str(data_string))
+    new_string = unescape(to_unicode_or_bust(data_string))
     new_string = _multi_replace(new_string, {
         '&nbsp;': ' ', '&quot;': '"', '&brvbar;': '|', "&#39;": "'", "\\": ""
     })
@@ -343,6 +349,12 @@ class CalendarParser(object):
                     event_dict["start_time"] = _fix_timezone(event["dtstart"].dt, self.time_zone)
                 if "DTEND" in event:
                     event_dict["end_time"] = _fix_timezone(event["dtend"].dt, self.time_zone)
+                if event_dict["start_time"].hour == 0 \
+                and event_dict["start_time"].minute == 0 \
+                and (event_dict["end_time"] - event_dict["start_time"]) == timedelta(days=1):
+                    event_dict["all_day"] = True
+                else:
+                    event_dict["all_day"] = False
                 
                 event_dict["repeats"] = False
                 if "RRULE" in event:
@@ -354,13 +366,6 @@ class CalendarParser(object):
                     if event_dict["repeat_freq"] == "YEARLY":
                         event_dict["repeat_day"] = event_dict["start_time"].day
                         event_dict["repeat_month"] = event_dict["start_time"].month
-
-                        if event_dict["start_time"].hour == 0 \
-                        and event_dict["start_time"].minute == 0 \
-                        and (event_dict["end_time"] - event_dict["start_time"]) == timedelta(days=1):
-                            event_dict["all_day"] = True
-                        else:
-                            event_dict["all_day"] = False
 
                     if "BYDAY" in rep_dict:
                         event_dict["repeat_day"] = rep_dict["BYDAY"][0]
